@@ -44,7 +44,7 @@ Leave the Supabase variables empty. The UI then uses the local mock desk in `.da
 
 These passwords work only in the mock desk. They are not production credentials.
 
-Live mode starts when all three variables are set. Do not commit them.
+Live mode starts when `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are both set. If either is missing, the local mock desk stays in use. Do not commit either value.
 
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=
@@ -52,7 +52,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 ```
 
-Apply `supabase/migrations/hub_security.sql` in the Supabase SQL editor before the first live sign-in. The service role is used only on the server: lockout counters, audit inserts, and provisioning. Authenticated clients cannot write those. Users can read their own profile and permissions. A Super Admin can read the directory. Triggers reject forged updates to role, status, lockout, MFA, and the audit log.
+`SUPABASE_SERVICE_ROLE_KEY` stays on the server. It is required for lockout counters, audit inserts, and creating accounts. Those writes are skipped rather than sent with the signed-in user's key. Paste `supabase/migrations/hub_security.sql` into the Supabase SQL editor before the first live sign-in. This repo cannot apply that file. Authenticated clients cannot write lockout, permissions, or the audit log. Users can read their own profile and permissions. A Super Admin can read the directory. Triggers reject forged updates to role, status, lockout, MFA, and the audit log.
 
 Password reset mail uses `resetPasswordForEmail` with redirect `https://db357.com/reset-password`.
 

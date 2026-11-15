@@ -3,7 +3,7 @@ import { createHash, randomBytes, randomUUID } from "crypto";
 import QRCode from "qrcode";
 import { cookies } from "next/headers";
 import { APP_CATALOG } from "@/lib/apps";
-import { isLiveSupabase } from "@/lib/config";
+import { hasServiceRole, isLiveSupabase } from "@/lib/config";
 import {
   FACTOR_COOKIE,
   MFA_COOKIE,
@@ -84,6 +84,17 @@ function inactiveResult(status: Status) {
   return { ok: false as const, code: "pending" as const, error: "This account is awaiting approval. Contact the administrator." };
 }
 
+const SERVICE_ROLE_REQUIRED = "The service role key is required on the server for this action.";
+
+function serviceClient() {
+  return hasServiceRole() ? createAdminClient() : null;
+}
+
+function schemaMissing(error: { code?: string; message?: string } | null) {
+  if (!error) return false;
+  return error.code === "42P01" || error.code === "PGRST205" || /does not exist|schema cache|hub_profiles|security_audit_logs/i.test(error.message ?? "");
+}
+
 async function writeAudit(entry: AuditInput) {
   if (!isLiveSupabase()) {
     await withDb((db) => {
@@ -98,7 +109,8 @@ async function writeAudit(entry: AuditInput) {
     });
     return;
   }
-  const admin = createAdminClient();
+  const admin = serviceClient();
+  if (!admin) return;
   await admin.from("security_audit_logs").insert({
     user_id: entry.userId,
     email: entry.email,
@@ -249,15 +261,19 @@ async function loginMock(email: string, password: string, totp: string | undefin
 }
 
 async function loginLive(email: string, password: string, totp: string | undefined, meta: RequestMeta): Promise<LoginResult> {
-  const admin = createAdminClient();
+  const admin = serviceClient();
   const supabase = await createClient();
-  const { data: profileRow } = await admin.from("hub_profiles").select("*").eq("email", email).maybeSingle();
-  const profile = profileRow as ProfileRow | null;
+  let profile: ProfileRow | null = null;
+  if (admin) {
+    const lookedUp = await admin.from("hub_profiles").select("*").eq("email", email).maybeSingle();
+    if (schemaMissing(lookedUp.error)) return { ok: false, error: "The security schema is not installed yet." };
+    profile = (lookedUp.data as ProfileRow | null) ?? null;
+  }
 
   if (profile?.locked_until && new Date(profile.locked_until).getTime() > Date.now()) {
     return lockResult(profile.locked_until);
   }
-  if (profile?.locked_until && new Date(profile.locked_until).getTime() <= Date.now()) {
+  if (admin && profile?.locked_until && new Date(profile.locked_until).getTime() <= Date.now()) {
     await admin.from("hub_profiles").update({ locked_until: null, failed_login_attempts: 0 }).eq("id", profile.id);
     profile.locked_until = null;
     profile.failed_login_attempts = 0;
@@ -290,8 +306,20 @@ async function loginLive(email: string, password: string, totp: string | undefin
   const signed = await supabase.auth.signInWithPassword({ email, password });
   if (signed.error || !signed.data.user) return registerLiveFailure(profile, email, meta);
   if (!profile) {
+    const own = await supabase.from("hub_profiles").select("*").eq("id", signed.data.user.id).maybeSingle();
+    if (schemaMissing(own.error)) {
+      await supabase.auth.signOut();
+      return { ok: false, error: "The security schema is not installed yet." };
+    }
+    profile = (own.data as ProfileRow | null) ?? null;
+  }
+  if (!profile) {
     await supabase.auth.signOut();
     return { ok: false, error: "Invalid credentials." };
+  }
+  if (profile.locked_until && new Date(profile.locked_until).getTime() > Date.now()) {
+    await supabase.auth.signOut();
+    return lockResult(profile.locked_until);
   }
   if (profile.status !== "active") {
     await supabase.auth.signOut();
@@ -306,8 +334,8 @@ async function loginLive(email: string, password: string, totp: string | undefin
 }
 
 async function registerLiveFailure(profile: ProfileRow | null, email: string, meta: RequestMeta): Promise<LoginResult> {
-  const admin = createAdminClient();
-  if (!profile) {
+  const admin = serviceClient();
+  if (!admin || !profile) {
     await writeAudit({ userId: null, email, action: "login_failed", ip: meta.ip, userAgent: meta.userAgent });
     return { ok: false, error: "Invalid credentials." };
   }
@@ -326,7 +354,11 @@ async function registerLiveFailure(profile: ProfileRow | null, email: string, me
 }
 
 async function markLiveSuccess(userId: string, email: string, meta: RequestMeta) {
-  const admin = createAdminClient();
+  const admin = serviceClient();
+  if (!admin) {
+    await writeAudit({ userId, email, action: "login_success", ip: meta.ip, userAgent: meta.userAgent });
+    return;
+  }
   await admin
     .from("hub_profiles")
     .update({ failed_login_attempts: 0, locked_until: null, last_login_at: new Date().toISOString() })
@@ -336,9 +368,11 @@ async function markLiveSuccess(userId: string, email: string, meta: RequestMeta)
 
 export async function requestReset(email: string, meta: RequestMeta) {
   if (isLiveSupabase()) {
-    const admin = createAdminClient();
+    const admin = serviceClient();
     const supabase = await createClient();
-    const { data: profile } = await admin.from("hub_profiles").select("id, email").eq("email", email).maybeSingle();
+    const profile = admin
+      ? (await admin.from("hub_profiles").select("id, email").eq("email", email).maybeSingle()).data
+      : null;
     await supabase.auth.resetPasswordForEmail(email, { redirectTo: RESET_REDIRECT });
     if (profile) {
       await writeAudit({
@@ -523,7 +557,8 @@ export async function confirmMfa(user: PublicUser, code: string, meta: RequestMe
       code: code.replace(/\s/g, ""),
     });
     if (verified.error) return { ok: false as const, error: "That code was not accepted." };
-    const admin = createAdminClient();
+    const admin = serviceClient();
+    if (!admin) return { ok: false as const, error: SERVICE_ROLE_REQUIRED };
     await admin.from("hub_profiles").update({ mfa_enabled: true }).eq("id", user.id);
     await writeAudit({ userId: user.id, email: user.email, action: "mfa_enabled", ip: meta.ip, userAgent: meta.userAgent });
     await clearCookie(FACTOR_COOKIE);
@@ -603,8 +638,9 @@ export async function signOutAll(user: PublicUser) {
 
 export async function listUsers(): Promise<PublicUser[]> {
   if (isLiveSupabase()) {
-    const admin = createAdminClient();
-    const { data } = await admin.from("hub_profiles").select("*, user_app_permissions(*)").order("full_name");
+    const client = serviceClient() ?? (await createClient());
+    const { data, error } = await client.from("hub_profiles").select("*, user_app_permissions(*)").order("full_name");
+    if (error) return [];
     return ((data ?? []) as ProfileRow[]).map(mapProfile);
   }
   return withDb((db) => db.users.map(toPublic).sort((a, b) => a.fullName.localeCompare(b.fullName)));
@@ -619,7 +655,8 @@ export async function createAccount(
     return { ok: false as const, error: "Temporary password does not meet the policy." };
   }
   if (isLiveSupabase()) {
-    const admin = createAdminClient();
+    const admin = serviceClient();
+    if (!admin) return { ok: false as const, error: SERVICE_ROLE_REQUIRED };
     const created = await admin.auth.admin.createUser({
       email: input.email,
       password: input.password,
@@ -700,7 +737,8 @@ export async function updateAccount(
   meta: RequestMeta,
 ) {
   if (isLiveSupabase()) {
-    const admin = createAdminClient();
+    const admin = serviceClient();
+    if (!admin) return { ok: false as const, error: SERVICE_ROLE_REQUIRED };
     if (patch.unlock) {
       await admin.from("hub_profiles").update({ failed_login_attempts: 0, locked_until: null }).eq("id", userId);
     }
@@ -784,8 +822,9 @@ function mapAudit(row: {
 
 export async function listAudits(): Promise<AuditRecord[]> {
   if (isLiveSupabase()) {
-    const admin = createAdminClient();
-    const { data } = await admin.from("security_audit_logs").select("*").order("created_at", { ascending: false }).limit(200);
+    const client = serviceClient() ?? (await createClient());
+    const { data, error } = await client.from("security_audit_logs").select("*").order("created_at", { ascending: false }).limit(200);
+    if (error) return [];
     return (data ?? []).map((row) => mapAudit(row as Parameters<typeof mapAudit>[0]));
   }
   return withDb((db) => db.audits.slice(0, 200));

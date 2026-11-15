@@ -3,11 +3,12 @@ function present(name: string) {
   return Boolean(value && value.trim());
 }
 
-/** Live mode needs the anon key and the service role. Lockout and audit writes must not run as the user. */
+/** The public project URL and anon key select the real desk. Missing either one keeps the local mock. */
 export function isLiveSupabase() {
-  return (
-    present("NEXT_PUBLIC_SUPABASE_URL") &&
-    present("NEXT_PUBLIC_SUPABASE_ANON_KEY") &&
-    present("SUPABASE_SERVICE_ROLE_KEY")
-  );
+  return present("NEXT_PUBLIC_SUPABASE_URL") && present("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+}
+
+/** Lockout counters, audit inserts, and provisioning. Never fall back to the user JWT for these. */
+export function hasServiceRole() {
+  return isLiveSupabase() && present("SUPABASE_SERVICE_ROLE_KEY");
 }
