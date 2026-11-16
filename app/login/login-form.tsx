@@ -17,6 +17,14 @@ export function LoginForm({ initialMfa }: { initialMfa: boolean }) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const type = params.get("type");
+    if ((type === "recovery" || type === "invite") && params.get("access_token") && params.get("refresh_token")) {
+      window.location.replace(`/reset-password${window.location.hash}`);
+    }
+  }, []);
+
+  useEffect(() => {
     if (!lockedUntil) return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);

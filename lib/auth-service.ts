@@ -1,6 +1,7 @@
 import "server-only";
 import { createHash, randomBytes, randomUUID } from "crypto";
 import QRCode from "qrcode";
+import { createClient as createAuthClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { APP_CATALOG } from "@/lib/apps";
 import { hasServiceRole, isLiveSupabase } from "@/lib/config";
@@ -38,6 +39,15 @@ const SESSION_MS = 12 * 60 * 60 * 1000;
 const TICKET_MS = 5 * 60 * 1000;
 const LOCK_MS = 30 * 60 * 1000;
 const RESET_REDIRECT = "https://db357.com/reset-password";
+const PASSWORD_SETUP_REDIRECT = "https://www.db357.com/reset-password";
+const FIRST_SUPER_ADMIN_EMAIL = "lastgod959@gmail.com";
+const FIRST_SUPER_ADMIN_PERMISSIONS: Permissions = {
+  can_access_land: true,
+  can_access_dmck: true,
+  can_access_coupon: true,
+  can_access_loan: true,
+  can_access_aircon: true,
+};
 
 type AuditInput = {
   userId: string | null;
@@ -408,17 +418,34 @@ export async function requestReset(email: string, meta: RequestMeta) {
   return { ok: true as const, devResetUrl: issued ? `/reset-password?token=${issued}` : undefined };
 }
 
-export async function resetPassword(input: { token?: string; code?: string; tokenHash?: string; password: string }, meta: RequestMeta) {
+export async function resetPassword(
+  input: {
+    token?: string;
+    code?: string;
+    tokenHash?: string;
+    otpType?: "invite" | "recovery";
+    accessToken?: string;
+    refreshToken?: string;
+    password: string;
+  },
+  meta: RequestMeta,
+) {
   const policy = assessPassword(input.password);
   if (!policy.ok) return { ok: false as const, error: "Password does not meet the policy." };
 
   if (isLiveSupabase()) {
+    if (input.accessToken && input.refreshToken) {
+      return applyPasswordFromSession(input.accessToken, input.refreshToken, input.password, meta);
+    }
     const supabase = await createClient();
     if (input.code) {
       const exchanged = await supabase.auth.exchangeCodeForSession(input.code);
       if (exchanged.error) return { ok: false as const, error: "This reset link is no longer valid." };
     } else if (input.tokenHash) {
-      const verified = await supabase.auth.verifyOtp({ type: "recovery", token_hash: input.tokenHash });
+      const verified = await supabase.auth.verifyOtp({
+        type: input.otpType === "invite" ? "invite" : "recovery",
+        token_hash: input.tokenHash,
+      });
       if (verified.error) return { ok: false as const, error: "This reset link is no longer valid." };
     } else {
       return { ok: false as const, error: "This reset link is no longer valid." };
@@ -644,6 +671,167 @@ export async function listUsers(): Promise<PublicUser[]> {
     return ((data ?? []) as ProfileRow[]).map(mapProfile);
   }
   return withDb((db) => db.users.map(toPublic).sort((a, b) => a.fullName.localeCompare(b.fullName)));
+}
+
+function passwordMailer() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) return null;
+  return createAuthClient(url, key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      flowType: "implicit",
+    },
+  });
+}
+
+async function applyPasswordFromSession(accessToken: string, refreshToken: string, password: string, meta: RequestMeta) {
+  const supabase = passwordMailer();
+  if (!supabase) return { ok: false as const, error: "This reset link is no longer valid." };
+  const session = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+  if (session.error || !session.data.user) return { ok: false as const, error: "This reset link is no longer valid." };
+  const updated = await supabase.auth.updateUser({ password });
+  if (updated.error || !updated.data.user) return { ok: false as const, error: "The password could not be changed." };
+  await writeAudit({
+    userId: updated.data.user.id,
+    email: updated.data.user.email ?? null,
+    action: "password_changed",
+    ip: meta.ip,
+    userAgent: meta.userAgent,
+  });
+  await supabase.auth.signOut({ scope: "global" });
+  return { ok: true as const };
+}
+
+function alreadyRegistered(error: { message?: string; code?: string } | null) {
+  if (!error) return false;
+  if (error.code === "email_exists") return true;
+  return /already been registered|already exists/i.test(error.message ?? "");
+}
+
+async function authUserIdByEmail(admin: NonNullable<ReturnType<typeof serviceClient>>, email: string) {
+  for (let page = 1; page <= 10; page += 1) {
+    const listed = await admin.auth.admin.listUsers({ page, perPage: 200 });
+    if (listed.error) return null;
+    const found = listed.data.users.find((user) => user.email?.toLowerCase() === email);
+    if (found?.id) return found.id;
+    if (listed.data.users.length < 200) return null;
+  }
+  return null;
+}
+
+async function mintInvitedUser(admin: NonNullable<ReturnType<typeof serviceClient>>) {
+  const invited = await admin.auth.admin.generateLink({
+    type: "invite",
+    email: FIRST_SUPER_ADMIN_EMAIL,
+    options: { redirectTo: PASSWORD_SETUP_REDIRECT },
+  });
+  if (invited.data?.properties) {
+    invited.data.properties.action_link = "";
+    invited.data.properties.email_otp = "";
+    invited.data.properties.hashed_token = "";
+  }
+  const id = invited.data?.user?.id;
+  if (id) return { id, minted: true as const };
+  if (!alreadyRegistered(invited.error)) return { error: "The account could not be filed." as const };
+  const existing = await authUserIdByEmail(admin, FIRST_SUPER_ADMIN_EMAIL);
+  if (!existing) return { error: "The account could not be filed." as const };
+  return { id: existing, minted: false as const };
+}
+
+async function sendPasswordSetupEmail() {
+  const mailer = passwordMailer();
+  if (!mailer) return false;
+  const sent = await mailer.auth.resetPasswordForEmail(FIRST_SUPER_ADMIN_EMAIL, { redirectTo: PASSWORD_SETUP_REDIRECT });
+  return !sent.error;
+}
+
+export async function bootstrapFirstSuperAdmin(meta: RequestMeta) {
+  if (!isLiveSupabase()) {
+    return { ok: false as const, status: 503, error: "Live Supabase is not configured on this deployment." };
+  }
+  const admin = serviceClient();
+  if (!admin) {
+    return {
+      ok: false as const,
+      status: 503,
+      error: "The service role key is not on this deployment. Redeploy after it is set in the host environment.",
+    };
+  }
+
+  const existingAdmins = await admin.from("hub_profiles").select("id").eq("role", "super_admin").limit(1);
+  if (existingAdmins.error) {
+    if (schemaMissing(existingAdmins.error)) {
+      return { ok: false as const, status: 503, error: "The security schema is not installed yet." };
+    }
+    return { ok: false as const, status: 500, error: "The desk could not be checked." };
+  }
+  if ((existingAdmins.data ?? []).length > 0) {
+    return { ok: false as const, status: 409, error: "A super admin already exists." };
+  }
+
+  const filed = await admin.from("hub_profiles").select("id").eq("email", FIRST_SUPER_ADMIN_EMAIL).maybeSingle();
+  if (filed.error) return { ok: false as const, status: 500, error: "The desk could not be checked." };
+  if (filed.data) return { ok: false as const, status: 409, error: "That account cannot be created." };
+
+  const minted = await mintInvitedUser(admin);
+  if ("error" in minted) return { ok: false as const, status: 500, error: minted.error };
+  const { id } = minted;
+
+  const confirmed = await admin.auth.admin.updateUserById(id, { email_confirm: true });
+  if (confirmed.error) {
+    if (minted.minted) await admin.auth.admin.deleteUser(id);
+    return { ok: false as const, status: 500, error: "The account could not be filed." };
+  }
+
+  const profile = await admin.from("hub_profiles").insert({
+    id,
+    email: FIRST_SUPER_ADMIN_EMAIL,
+    role: "super_admin",
+    status: "active",
+  });
+  if (profile.error) {
+    const winner = await admin.from("hub_profiles").select("role").eq("id", id).maybeSingle();
+    if (winner.data?.role === "super_admin") {
+      return { ok: false as const, status: 409, error: "A super admin already exists." };
+    }
+    if (minted.minted) await admin.auth.admin.deleteUser(id);
+    return { ok: false as const, status: 500, error: "The account could not be filed." };
+  }
+
+  const perms = await admin.from("user_app_permissions").insert({
+    user_id: id,
+    ...FIRST_SUPER_ADMIN_PERMISSIONS,
+    updated_by: id,
+    updated_at: new Date().toISOString(),
+  });
+  if (perms.error) {
+    const row = await admin.from("user_app_permissions").select("user_id").eq("user_id", id).maybeSingle();
+    if (row.data) return { ok: false as const, status: 409, error: "A super admin already exists." };
+    if (minted.minted) await admin.auth.admin.deleteUser(id);
+    else await admin.from("hub_profiles").delete().eq("id", id);
+    return { ok: false as const, status: 500, error: "The account could not be filed." };
+  }
+
+  const emailSent = await sendPasswordSetupEmail();
+  await writeAudit({
+    userId: id,
+    email: FIRST_SUPER_ADMIN_EMAIL,
+    action: "user_created",
+    ip: meta.ip,
+    userAgent: meta.userAgent,
+  });
+  if (!emailSent) {
+    return {
+      ok: false as const,
+      status: 502,
+      emailSent: false as const,
+      error: "The account is filed, but the password email was not sent. Request a reset from the sign-in desk.",
+    };
+  }
+  return { ok: true as const, emailSent: true as const };
 }
 
 export async function createAccount(
