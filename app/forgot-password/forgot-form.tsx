@@ -36,7 +36,7 @@ export function ForgotForm() {
       <p className="eyebrow">Password reset</p>
       <h2 className="mt-3 text-xl font-medium">Request a link</h2>
       <p className="mt-2 text-sm leading-6 text-mute">
-        The live desk sends mail through Supabase to https://db357.com/reset-password. The local mock shows the link here.
+        The live desk sends mail through Supabase to https://www.db357.com/reset-password. The local mock shows the link here.
       </p>
       <label className="mt-6 block">
         <span className="label">Email</span>
