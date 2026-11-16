@@ -10,6 +10,7 @@ const PUBLIC_API = new Set([
   "/api/auth/reset",
   "/api/auth/logout",
   "/api/auth/mfa/hint",
+  "/api/admin/bootstrap",
 ]);
 
 export async function middleware(request: NextRequest) {
