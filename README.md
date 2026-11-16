@@ -5,7 +5,7 @@ Private access desk for [db357.com](https://db357.com). There is no public signu
 | Desk | Address | Flag |
 | --- | --- | --- |
 | Land pawn / mortgage | https://168.db357.com | `can_access_land` |
-| Domain checker DM-CK | https://db357.com/dmck | `can_access_dmck` |
+| Domain checker DM-CK | https://spinlytics-db357.vercel.app | `can_access_dmck` |
 | Digital coupon / agent network | https://app.db357.com | `can_access_coupon` |
 | Personal loan book | https://loan.db357.com | `can_access_loan` |
 | Car aircon shop | https://air.db357.com | `can_access_aircon` |
@@ -22,9 +22,11 @@ A launch link is a normal top-level navigation. The browser will send the hub co
 
 That cookie is a session **only when the destination app uses this same Supabase project** (same project URL, same JWT secret, same `@supabase/ssr` cookie names). Land uses its own Supabase project, so the hub cookie does not sign anyone in there.
 
-Land Desk is the one handoff. Open on the Land card, and the Land entry in the app switcher, goes to `/auth/land-handoff`. That route runs only for a signed-in active account with `can_access_land`, then posts a 60-second HMAC token to `https://168.db357.com/auth/hub`. Land checks the signature and opens its own session when an auth user with that email already exists. It does not create an account, copy rows, or change the Land password. If no Land user has that email, Land stops and says so.
+Land Desk is one handoff. Open on the Land card, and the Land entry in the app switcher, goes to `/auth/land-handoff`. That route runs only for a signed-in active account with `can_access_land`, then posts a 60-second HMAC token to `https://168.db357.com/auth/hub`. Land checks the signature and opens its own session when an auth user with that email already exists. It does not create an account, copy rows, or change the Land password. If no Land user has that email, Land stops and says so.
 
-Set the same `LAND_HANDOFF_SECRET` (at least 32 characters) on the hub and on Land. Land also needs its own `SUPABASE_SERVICE_ROLE_KEY` for `https://fahkknzinragbeizymny.supabase.co`. No extra Supabase redirect URL is required. DM-CK, Coupon, Loan, and Aircon still have no shared token. Copy `lib/appGuard.ts` only into desks that share this project, and set `NEXT_PUBLIC_HUB_ORIGIN=https://db357.com` on those desks.
+DM-CK is a separate handoff. Open on the DM-CK card, and the DM-CK entry in the app switcher, goes to `/auth/dmck-handoff`. That route runs only for a signed-in active account with `can_access_dmck`, then posts a 60-second HMAC token to DM-CK `/auth/hub`. DM-CK checks the signature and opens its own session when a user with that email already exists. It does not create an account, copy rows, or change the DM-CK password. If no DM-CK user has that email, DM-CK stops and says so.
+
+Set the same `LAND_HANDOFF_SECRET` (at least 32 characters) on the hub and on Land. Land also needs its own `SUPABASE_SERVICE_ROLE_KEY` for `https://fahkknzinragbeizymny.supabase.co`. No extra Supabase redirect URL is required. Set a different `DMCK_HANDOFF_SECRET` (at least 32 characters) on the hub and on DM-CK. Do not reuse the Land secret. Leave `DMCK_DESK_URL` unset. The token then posts to `https://spinlytics-db357.vercel.app/auth/hub`, which is the DM-CK app. `https://db357.com/dmck` is still this hub, so it cannot accept that token. Coupon, Loan, and Aircon still have no shared token. Copy `lib/appGuard.ts` only into desks that share this project, and set `NEXT_PUBLIC_HUB_ORIGIN=https://db357.com` on those desks.
 
 ## Run locally
 
