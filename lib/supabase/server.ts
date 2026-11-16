@@ -1,6 +1,7 @@
 import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies, headers } from "next/headers";
+import { readApiKey, readSupabaseUrl } from "@/lib/config";
 import { hubCookieOptions } from "@/lib/cookies";
 
 /**
@@ -11,8 +12,8 @@ import { hubCookieOptions } from "@/lib/cookies";
  * Middleware refreshes the cookie. All auth calls go through this server client.
  */
 export async function createClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const url = readSupabaseUrl();
+  const key = readApiKey("NEXT_PUBLIC_SUPABASE_ANON_KEY");
   if (!url || !key) {
     throw new Error("Supabase public env is not configured.");
   }

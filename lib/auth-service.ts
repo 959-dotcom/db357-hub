@@ -4,7 +4,7 @@ import QRCode from "qrcode";
 import { createClient as createAuthClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { APP_CATALOG } from "@/lib/apps";
-import { hasServiceRole, isLiveSupabase } from "@/lib/config";
+import { hasServiceRole, isLiveSupabase, readApiKey, readSupabaseUrl } from "@/lib/config";
 import {
   FACTOR_COOKIE,
   MFA_COOKIE,
@@ -103,6 +103,24 @@ function serviceClient() {
 function schemaMissing(error: { code?: string; message?: string } | null) {
   if (!error) return false;
   return error.code === "42P01" || error.code === "PGRST205" || /does not exist|schema cache|hub_profiles|security_audit_logs/i.test(error.message ?? "");
+}
+
+function profileLookupFailure(error: { code?: string; message?: string } | null) {
+  const message = error?.message ?? "";
+  if (error?.code === "42501" || /permission denied/i.test(message)) {
+    return { ok: false as const, status: 503 as const, error: "The service role cannot read the desk tables." };
+  }
+  if (error?.code === "PGRST301" || /invalid api key|invalid character in header|invalid header|jws|jwt/i.test(message)) {
+    return {
+      ok: false as const,
+      status: 503 as const,
+      error: "Supabase rejected the service role key. Save that key with no spaces or line breaks, then redeploy.",
+    };
+  }
+  if (schemaMissing(error)) {
+    return { ok: false as const, status: 503 as const, error: "The security schema is not installed yet." };
+  }
+  return { ok: false as const, status: 500 as const, error: "The desk could not be checked." };
 }
 
 async function writeAudit(entry: AuditInput) {
@@ -674,8 +692,8 @@ export async function listUsers(): Promise<PublicUser[]> {
 }
 
 function passwordMailer() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const url = readSupabaseUrl();
+  const key = readApiKey("NEXT_PUBLIC_SUPABASE_ANON_KEY");
   if (!url || !key) return null;
   return createAuthClient(url, key, {
     auth: {
@@ -762,18 +780,13 @@ export async function bootstrapFirstSuperAdmin(meta: RequestMeta) {
   }
 
   const existingAdmins = await admin.from("hub_profiles").select("id").eq("role", "super_admin").limit(1);
-  if (existingAdmins.error) {
-    if (schemaMissing(existingAdmins.error)) {
-      return { ok: false as const, status: 503, error: "The security schema is not installed yet." };
-    }
-    return { ok: false as const, status: 500, error: "The desk could not be checked." };
-  }
+  if (existingAdmins.error) return profileLookupFailure(existingAdmins.error);
   if ((existingAdmins.data ?? []).length > 0) {
     return { ok: false as const, status: 409, error: "A super admin already exists." };
   }
 
   const filed = await admin.from("hub_profiles").select("id").eq("email", FIRST_SUPER_ADMIN_EMAIL).maybeSingle();
-  if (filed.error) return { ok: false as const, status: 500, error: "The desk could not be checked." };
+  if (filed.error) return profileLookupFailure(filed.error);
   if (filed.data) return { ok: false as const, status: 409, error: "That account cannot be created." };
 
   const minted = await mintInvitedUser(admin);
