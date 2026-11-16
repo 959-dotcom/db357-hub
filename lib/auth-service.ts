@@ -38,8 +38,7 @@ import {
 const SESSION_MS = 12 * 60 * 60 * 1000;
 const TICKET_MS = 5 * 60 * 1000;
 const LOCK_MS = 30 * 60 * 1000;
-const RESET_REDIRECT = "https://db357.com/reset-password";
-const PASSWORD_SETUP_REDIRECT = "https://www.db357.com/reset-password";
+const PASSWORD_RESET_REDIRECT = "https://www.db357.com/reset-password";
 const FIRST_SUPER_ADMIN_EMAIL = "lastgod959@gmail.com";
 const FIRST_SUPER_ADMIN_PERMISSIONS: Permissions = {
   can_access_land: true,
@@ -401,7 +400,7 @@ export async function requestReset(email: string, meta: RequestMeta) {
     const profile = admin
       ? (await admin.from("hub_profiles").select("id, email").eq("email", email).maybeSingle()).data
       : null;
-    await supabase.auth.resetPasswordForEmail(email, { redirectTo: RESET_REDIRECT });
+    await supabase.auth.resetPasswordForEmail(email, { redirectTo: PASSWORD_RESET_REDIRECT });
     if (profile) {
       await writeAudit({
         userId: profile.id,
@@ -744,7 +743,7 @@ async function mintInvitedUser(admin: NonNullable<ReturnType<typeof serviceClien
   const invited = await admin.auth.admin.generateLink({
     type: "invite",
     email: FIRST_SUPER_ADMIN_EMAIL,
-    options: { redirectTo: PASSWORD_SETUP_REDIRECT },
+    options: { redirectTo: PASSWORD_RESET_REDIRECT },
   });
   if (invited.data?.properties) {
     invited.data.properties.action_link = "";
@@ -762,7 +761,7 @@ async function mintInvitedUser(admin: NonNullable<ReturnType<typeof serviceClien
 async function sendPasswordSetupEmail() {
   const mailer = passwordMailer();
   if (!mailer) return false;
-  const sent = await mailer.auth.resetPasswordForEmail(FIRST_SUPER_ADMIN_EMAIL, { redirectTo: PASSWORD_SETUP_REDIRECT });
+  const sent = await mailer.auth.resetPasswordForEmail(FIRST_SUPER_ADMIN_EMAIL, { redirectTo: PASSWORD_RESET_REDIRECT });
   return !sent.error;
 }
 

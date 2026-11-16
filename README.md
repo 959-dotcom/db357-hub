@@ -54,7 +54,7 @@ SUPABASE_SERVICE_ROLE_KEY=
 
 `SUPABASE_SERVICE_ROLE_KEY` stays on the server. It is required for lockout counters, audit inserts, and creating accounts. Those writes are skipped rather than sent with the signed-in user's key. Paste `supabase/migrations/hub_security.sql` into the Supabase SQL editor before the first live sign-in. This repo cannot apply that file. Authenticated clients cannot write lockout, permissions, or the audit log. Users can read their own profile and permissions. A Super Admin can read the directory. Triggers reject forged updates to role, status, lockout, MFA, and the audit log.
 
-Password reset mail uses `resetPasswordForEmail` with redirect `https://db357.com/reset-password`.
+Password reset mail uses `resetPasswordForEmail` with redirect `https://www.db357.com/reset-password`.
 
 Five failed passwords lock the account for 30 minutes. The sign-in page shows the remaining time. Passwords need 10 characters, upper and lower case, a number, and a symbol.
 
