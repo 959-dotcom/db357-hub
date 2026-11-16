@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { HubShell } from "@/components/hub-shell";
 import { appsFor } from "@/lib/apps";
+import { landLaunchHref } from "@/lib/landHandoff";
 import { getAlerts, listAudits, listUsers, logUnauthorized } from "@/lib/auth-service";
 import { requestMeta } from "@/lib/request-meta";
 import { requireUser } from "@/lib/session";
@@ -22,7 +23,7 @@ export default async function SecurityPage() {
     <HubShell
       user={user}
       alerts={alerts}
-      desks={desks.map((desk) => ({ key: desk.key, name: desk.name, subtitle: desk.subtitle, href: desk.href }))}
+      desks={desks.map((desk) => ({ key: desk.key, name: desk.name, subtitle: desk.subtitle, href: landLaunchHref(desk.key, desk.href) }))}
     >
       <p className="eyebrow">Security</p>
       <div className="mt-3 flex flex-wrap items-end justify-between gap-3">

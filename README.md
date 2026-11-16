@@ -20,7 +20,11 @@ HttpOnly is deliberate. Page scripts cannot read the session. Auth runs on the s
 
 A launch link is a normal top-level navigation. The browser will send the hub cookie to `168.db357.com`, `app.db357.com`, `loan.db357.com`, `air.db357.com`, and `db357.com` because of `Domain=.db357.com`.
 
-That cookie is a session **only when the destination app uses this same Supabase project** (same project URL, same JWT secret, same `@supabase/ssr` cookie names). If Land, DM-CK, Coupon, Loan, or Aircon are separate Supabase projects, they cannot validate the hub cookie. This hub does not invent a shared token, query-string handoff, or second login to paper over that. Copy `lib/appGuard.ts` only into desks that share this project, and set `NEXT_PUBLIC_HUB_ORIGIN=https://db357.com` on those desks.
+That cookie is a session **only when the destination app uses this same Supabase project** (same project URL, same JWT secret, same `@supabase/ssr` cookie names). Land uses its own Supabase project, so the hub cookie does not sign anyone in there.
+
+Land Desk is the one handoff. Open on the Land card, and the Land entry in the app switcher, goes to `/auth/land-handoff`. That route runs only for a signed-in active account with `can_access_land`, then posts a 60-second HMAC token to `https://168.db357.com/auth/hub`. Land checks the signature and opens its own session when an auth user with that email already exists. It does not create an account, copy rows, or change the Land password. If no Land user has that email, Land stops and says so.
+
+Set the same `LAND_HANDOFF_SECRET` (at least 32 characters) on the hub and on Land. Land also needs its own `SUPABASE_SERVICE_ROLE_KEY` for `https://fahkknzinragbeizymny.supabase.co`. No extra Supabase redirect URL is required. DM-CK, Coupon, Loan, and Aircon still have no shared token. Copy `lib/appGuard.ts` only into desks that share this project, and set `NEXT_PUBLIC_HUB_ORIGIN=https://db357.com` on those desks.
 
 ## Run locally
 
