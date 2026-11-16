@@ -1,6 +1,7 @@
 import { HubShell } from "@/components/hub-shell";
 import { AppCard } from "@/components/app-card";
 import { appsFor } from "@/lib/apps";
+import { landLaunchHref } from "@/lib/landHandoff";
 import { getAlerts } from "@/lib/auth-service";
 import { greeting, ROLE_LABEL } from "@/lib/format";
 import { requireUser } from "@/lib/session";
@@ -13,7 +14,7 @@ export async function Desk() {
     <HubShell
       user={user}
       alerts={alerts}
-      desks={desks.map((desk) => ({ key: desk.key, name: desk.name, subtitle: desk.subtitle, href: desk.href }))}
+      desks={desks.map((desk) => ({ key: desk.key, name: desk.name, subtitle: desk.subtitle, href: landLaunchHref(desk.key, desk.href) }))}
     >
       <p className="eyebrow">Private desk</p>
       <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
