@@ -1,0 +1,37 @@
+import { createServerClient } from "@supabase/ssr";
+import { NextResponse, type NextRequest } from "next/server";
+import { readApiKey, readSupabaseUrl } from "@/lib/config";
+import { hubCookieOptions } from "@/lib/cookies";
+
+export async function openLiveSession(request: NextRequest) {
+  const url = readSupabaseUrl();
+  const key = readApiKey("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  let response = NextResponse.next({ request });
+
+  const supabase = createServerClient(url, key, {
+    cookieOptions: hubCookieOptions(request.nextUrl.hostname, request.nextUrl.protocol),
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+        response = NextResponse.next({ request });
+        cookiesToSet.forEach(({ name, value, options }) => {
+          response.cookies.set(name, value, options);
+        });
+      },
+    },
+  });
+
+  const { data } = await supabase.auth.getUser();
+
+  function carry(next: NextResponse) {
+    response.cookies.getAll().forEach((cookie) => {
+      next.cookies.set(cookie.name, cookie.value);
+    });
+    return next;
+  }
+
+  return { supabase, response, user: data.user, carry };
+}
