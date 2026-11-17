@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { HubShell } from "@/components/hub-shell";
 import { appsFor } from "@/lib/apps";
-import { landLaunchHref } from "@/lib/landHandoff";
+import { deskLaunchHref } from "@/lib/deskLaunch";
 import { getAlerts, listMyAudits } from "@/lib/auth-service";
 import { ACTION_LABEL, ROLE_LABEL, formatWhen } from "@/lib/format";
 import { requireUser } from "@/lib/session";
@@ -17,7 +17,7 @@ export default async function ProfilePage() {
     <HubShell
       user={user}
       alerts={alerts}
-      desks={desks.map((desk) => ({ key: desk.key, name: desk.name, subtitle: desk.subtitle, href: landLaunchHref(desk.key, desk.href) }))}
+      desks={desks.map((desk) => ({ key: desk.key, name: desk.name, subtitle: desk.subtitle, href: deskLaunchHref(desk.key, desk.href) }))}
     >
       <p className="eyebrow">Profile</p>
       <div className="mt-3 flex flex-wrap items-end justify-between gap-4">

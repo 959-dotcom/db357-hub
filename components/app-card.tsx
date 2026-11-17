@@ -1,5 +1,5 @@
 import type { APP_CATALOG } from "@/lib/apps";
-import { landLaunchHref } from "@/lib/landHandoff";
+import { deskLaunchHref } from "@/lib/deskLaunch";
 
 type Desk = (typeof APP_CATALOG)[number];
 
@@ -15,7 +15,7 @@ export function AppCard({ app }: { app: Desk }) {
       </div>
       <h2 className="mt-6 text-2xl font-medium tracking-tight">{app.name}</h2>
       <p className="mt-3 flex-1 text-sm leading-6 text-mute">{app.description}</p>
-      <a href={landLaunchHref(app.key, app.href)} className="quiet-link mt-6 inline-flex items-center gap-2 text-sm">
+      <a href={deskLaunchHref(app.key, app.href)} className="quiet-link mt-6 inline-flex items-center gap-2 text-sm">
         Open
         <span aria-hidden>→</span>
       </a>

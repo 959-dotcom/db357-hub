@@ -15,7 +15,7 @@ export const APP_CATALOG = [
     name: "DM-CK",
     subtitle: "Domain checker",
     description: "Registry lookups and availability for the house book.",
-    href: "https://db357.com/dmck",
+    href: "https://spinlytics-db357.vercel.app",
   },
   {
     key: "coupon",
